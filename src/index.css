@@ -4,6 +4,8 @@
 
 @layer base {
   :root {
+    --brand-primary: #0D4F8B;
+    --brand-accent: #1565C0;
     --background: 0 0% 100%;
     --foreground: 220 13% 18%;
     --card: 0 0% 100%;

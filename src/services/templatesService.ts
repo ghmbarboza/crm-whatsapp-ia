@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { MessageTemplate } from '@/integrations/supabase/types'
+import { DEFAULT_VARIABLES } from '@/services/systemSettingsService'
 
 export const templatesKeys = {
   all: ['templates'] as const,
@@ -11,8 +12,18 @@ export async function fetchTemplates() {
   return data as MessageTemplate[]
 }
 
-export async function createTemplate(template: Omit<MessageTemplate, 'id' | 'criado_em' | 'atualizado_em'>) {
-  const { data, error } = await supabase.from('message_templates').insert(template).select().single()
+export async function createTemplate(
+  template: Omit<MessageTemplate, 'id' | 'criado_em' | 'atualizado_em' | 'variaveis' | 'criado_por'> &
+    Partial<Pick<MessageTemplate, 'variaveis' | 'criado_por'>>
+) {
+  const { data, error } = await supabase
+    .from('message_templates')
+    .insert({
+      ...template,
+      variaveis: template.variaveis ?? DEFAULT_VARIABLES,
+    })
+    .select()
+    .single()
   if (error) throw error
   return data as MessageTemplate
 }

@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { sendEvolutionTextMessage } from "../_shared/evolutionApi.ts";
+import { loadEvolutionConfigFromDb } from "../_shared/evolutionConfig.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,29 +52,22 @@ Deno.serve(async (req) => {
 
     if (!lead) throw new Error("Lead não encontrado");
 
-    const evolutionUrl = Deno.env.get("EVOLUTION_API_URL");
-    const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
-    const instance = Deno.env.get("EVOLUTION_INSTANCE") || "crm-whatsapp";
-
-    if (evolutionUrl && evolutionKey) {
-      const phone = lead.telefone.replace(/\D/g, "");
-      await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: evolutionKey,
-        },
-        body: JSON.stringify({
-          number: phone,
-          text: conteudo,
-        }),
-      });
-    }
-
     const serviceClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    const evolution = await loadEvolutionConfigFromDb(serviceClient);
+    if (evolution) {
+      const phone = lead.telefone.replace(/\D/g, "");
+      await sendEvolutionTextMessage(
+        evolution.url,
+        evolution.key,
+        evolution.instance,
+        phone,
+        conteudo,
+      );
+    }
 
     const { data: mensagem, error } = await serviceClient
       .from("mensagens_whatsapp")

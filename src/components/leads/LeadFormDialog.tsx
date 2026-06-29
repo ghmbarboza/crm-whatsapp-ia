@@ -5,6 +5,7 @@ import { AlertCircle } from 'lucide-react'
 import { leadSchema, type LeadFormData } from '@/utils/validators'
 import { formatPhone } from '@/utils/formatPhone'
 import { useCreateLead, useUpdateLead } from '@/hooks/useLeads'
+import { findLeadByPhone } from '@/services/leadsService'
 import type { Lead } from '@/integrations/supabase/types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -17,9 +18,10 @@ interface LeadFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   lead?: Lead | null
+  defaultStage?: LeadFormData['etapa_pipeline']
 }
 
-export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps) {
+export function LeadFormDialog({ open, onOpenChange, lead, defaultStage = 'Novo' }: LeadFormDialogProps) {
   const createLead = useCreateLead()
   const updateLead = useUpdateLead()
 
@@ -59,13 +61,39 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
         empresa: '',
         classificacao: 'frio',
         sentimento: 'neutro',
-        etapa_pipeline: 'Novo',
+        etapa_pipeline: defaultStage,
         anotacoes: '',
       })
     }
-  }, [lead, reset, open])
+  }, [lead, reset, open, defaultStage])
 
   const onSubmit = async (data: LeadFormData) => {
+    if (!lead) {
+      const existing = await findLeadByPhone(data.telefone)
+      if (existing) {
+        const confirm = window.confirm(
+          `Já existe um lead com este telefone (${existing.nome}). Deseja atualizar o registro existente em vez de criar um duplicado?`
+        )
+        if (confirm) {
+          await updateLead.mutateAsync({
+            id: existing.id,
+            updates: {
+              nome: data.nome,
+              email: data.email || null,
+              empresa: data.empresa || null,
+              classificacao: data.classificacao,
+              sentimento: data.sentimento,
+              etapa_pipeline: data.etapa_pipeline,
+              anotacoes: data.anotacoes || null,
+            },
+          })
+          onOpenChange(false)
+          return
+        }
+        return
+      }
+    }
+
     const payload = {
       ...data,
       email: data.email || null,

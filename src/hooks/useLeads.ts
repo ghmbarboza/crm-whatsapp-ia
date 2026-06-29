@@ -87,9 +87,38 @@ export function useDeleteLead() {
 
 export function useUpdateLeadStage() {
   const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: ({ id, stage }: { id: string; stage: EtapaPipeline }) => updateLeadStage(id, stage),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: leadsKeys.all }),
-    onError: (e: Error) => toast.error(e.message),
+    onMutate: async ({ id, stage }) => {
+      await queryClient.cancelQueries({ queryKey: leadsKeys.all })
+      const snapshots = queryClient.getQueriesData<Lead[]>({ queryKey: leadsKeys.all })
+
+      queryClient.setQueriesData<Lead[]>({ queryKey: leadsKeys.all }, (old) => {
+        if (!old) return old
+        return old.map((l) => (l.id === id ? { ...l, etapa_pipeline: stage } : l))
+      })
+
+      return { snapshots }
+    },
+    onSuccess: () => {
+      toast.success('Lead movido com sucesso')
+    },
+    onError: (e: Error, _variables, context) => {
+      context?.snapshots.forEach(([key, data]) => {
+        queryClient.setQueryData(key, data)
+      })
+      toast.error(e.message || 'Falha ao mover lead', {
+        action: {
+          label: 'Tentar novamente',
+          onClick: () => {
+            queryClient.invalidateQueries({ queryKey: leadsKeys.all })
+          },
+        },
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: leadsKeys.all })
+    },
   })
 }

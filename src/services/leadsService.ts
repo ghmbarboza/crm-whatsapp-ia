@@ -11,6 +11,7 @@ export async function fetchLeads(filters?: {
   etapa?: EtapaPipeline
   classificacao?: string
   search?: string
+  responsavelId?: string
 }) {
   let query = supabase
     .from('leads')
@@ -21,6 +22,7 @@ export async function fetchLeads(filters?: {
 
   if (filters?.etapa) query = query.eq('etapa_pipeline', filters.etapa)
   if (filters?.classificacao) query = query.eq('classificacao', filters.classificacao)
+  if (filters?.responsavelId) query = query.eq('responsavel_id', filters.responsavelId)
   if (filters?.search) {
     query = query.or(`nome.ilike.%${filters.search}%,telefone.ilike.%${filters.search}%`)
   }
@@ -34,6 +36,19 @@ export async function fetchLead(id: string) {
   const { data, error } = await supabase.from('leads').select('*').eq('id', id).single()
   if (error) throw error
   return data as Lead
+}
+
+export async function findLeadByPhone(telefone: string): Promise<Lead | null> {
+  const digits = telefone.replace(/\D/g, '')
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .is('deleted_at', null)
+    .or(`telefone.ilike.%${digits}%,telefone.eq.${telefone}`)
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data as Lead | null
 }
 
 export async function createLead(lead: Omit<Lead, 'id' | 'criado_em' | 'atualizado_em' | 'deleted_at'>) {

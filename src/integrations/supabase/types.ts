@@ -3,6 +3,26 @@ export type Classificacao = 'quente' | 'morno' | 'frio'
 export type Sentimento = 'positivo' | 'neutro' | 'negativo'
 export type EtapaPipeline = 'Novo' | 'Em Contato' | 'Qualificado' | 'Fechado'
 export type TipoMensagem = 'recebida' | 'enviada'
+export type TimelineEventType =
+  | 'mudanca_etapa'
+  | 'registro_resultado'
+  | 'anotacao'
+  | 'conversao'
+  | 'atribuicao'
+  | 'mensagem_recebida'
+  | 'mensagem_enviada'
+  | 'sugestao_ia_aceita'
+  | 'anexo_enviado'
+
+export interface TimelineEvent {
+  id: string
+  lead_id: string
+  user_id: string | null
+  tipo: TimelineEventType
+  dados: Record<string, unknown>
+  criado_em: string
+  profiles?: { full_name: string } | null
+}
 
 export interface Profile {
   id: string
@@ -10,9 +30,14 @@ export interface Profile {
   full_name: string
   role: UserRole
   two_factor_enabled: boolean
+  is_active: boolean
   terms_accepted_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface UserWithTeams extends Profile {
+  equipes: { id: string; nome: string }[]
 }
 
 export interface Lead {
@@ -81,8 +106,21 @@ export interface MessageTemplate {
   conteudo: string
   tipo: 'boas_vindas' | 'follow_up' | 'lembrete'
   ativo: boolean
+  variaveis: string[]
+  criado_por: string | null
   criado_em: string
   atualizado_em: string
+}
+
+export interface SystemPreferences {
+  id: string
+  paleta_cores: 'azul' | 'verde' | 'vermelho'
+  idioma: string
+  horario_local: string
+  logo_url: string | null
+  mensagem_padrao: string
+  updated_at: string
+  updated_by: string | null
 }
 
 export interface WhatsappConfig {
@@ -93,11 +131,91 @@ export interface WhatsappConfig {
   updated_at: string
 }
 
+export interface BusinessHourSlot {
+  enabled: boolean
+  start: string
+  end: string
+}
+
+export type BusinessHours = Record<string, BusinessHourSlot>
+
+export interface IntegrationParameters {
+  auto_message: string
+  business_hours: BusinessHours
+  evolution_url?: string
+  evolution_api_key?: string
+  evolution_instance?: string
+  evolution_configured?: boolean
+}
+
+export interface IntegrationSettings {
+  id: string
+  type: string
+  status: 'connected' | 'disconnected'
+  parameters_json: IntegrationParameters
+  created_at: string
+  updated_at: string
+}
+
+export interface IntegrationLog {
+  id: string
+  event: string
+  status: 'success' | 'error' | 'info'
+  description: string | null
+  user_id: string | null
+  timestamp: string
+}
+
+export interface WhatsappNumber {
+  id: string
+  phone: string
+  is_active: boolean
+  assigned_team_id: string | null
+  created_at: string
+  equipes?: { id: string; nome: string } | null
+}
+
 export interface AiConfig {
   id: string
   threshold_quente: number
   threshold_morno: number
   updated_at: string
+}
+
+export interface AIClassificationSettings {
+  sentiment_sensitivity: number
+  threshold_quente: number
+  threshold_morno: number
+  positive_sentiment_ratio: number
+  min_messages_volume: number
+  keywords_quente: string[]
+  keywords_frio: string[]
+  trigger_notify_quente: boolean
+  trigger_notify_morno: boolean
+  trigger_notify_frio: boolean
+  auto_message_preview: string
+  classifier_version: string
+}
+
+export interface LeadAutoClassification {
+  id: string
+  lead_id: string
+  classification_enum: Classificacao
+  sentiment: Sentimento
+  trigger_source: string
+  classifier_version: string
+  initial_message: string | null
+  created_at: string
+  leads?: { id: string; nome: string; telefone: string; etapa_pipeline: string } | null
+}
+
+export interface ClassificationReviewLog {
+  id: string
+  admin_id: string | null
+  action: string
+  example_data: Record<string, unknown>
+  timestamp: string
+  profiles?: { full_name: string } | null
 }
 
 export interface Database {
@@ -119,6 +237,12 @@ export interface Database {
         Row: Mensagem
         Insert: Partial<Mensagem> & Pick<Mensagem, 'lead_id' | 'conteudo' | 'tipo'>
         Update: Partial<Mensagem>
+        Relationships: []
+      }
+      timeline_events: {
+        Row: TimelineEvent
+        Insert: Partial<TimelineEvent> & Pick<TimelineEvent, 'lead_id' | 'tipo'>
+        Update: Partial<TimelineEvent>
         Relationships: []
       }
       equipes: {
@@ -179,12 +303,99 @@ export interface Database {
         Update: Partial<AiConfig>
         Relationships: []
       }
+      integration_settings: {
+        Row: IntegrationSettings
+        Insert: Partial<IntegrationSettings> & Pick<IntegrationSettings, 'type'>
+        Update: Partial<IntegrationSettings>
+        Relationships: []
+      }
+      integration_logs: {
+        Row: IntegrationLog
+        Insert: Partial<IntegrationLog> & Pick<IntegrationLog, 'event' | 'status'>
+        Update: Partial<IntegrationLog>
+        Relationships: []
+      }
+      whatsapp_numbers: {
+        Row: WhatsappNumber
+        Insert: Partial<WhatsappNumber> & Pick<WhatsappNumber, 'phone'>
+        Update: Partial<WhatsappNumber>
+        Relationships: []
+      }
+      ai_classification_settings: {
+        Row: { id: string; param_name: string; param_value: unknown; updated_at: string }
+        Insert: { param_name: string; param_value: unknown }
+        Update: Partial<{ param_value: unknown; updated_at: string }>
+        Relationships: []
+      }
+      lead_auto_classifications: {
+        Row: LeadAutoClassification
+        Insert: Partial<LeadAutoClassification> & Pick<LeadAutoClassification, 'lead_id' | 'classification_enum' | 'sentiment'>
+        Update: Partial<LeadAutoClassification>
+        Relationships: []
+      }
+      classification_review_logs: {
+        Row: ClassificationReviewLog
+        Insert: Partial<ClassificationReviewLog> & Pick<ClassificationReviewLog, 'action'>
+        Update: Partial<ClassificationReviewLog>
+        Relationships: []
+      }
     }
     Views: {
       v_leads_por_etapa: { Row: { etapa_pipeline: string; total: number }; Relationships: [] }
       v_leads_por_classificacao: { Row: { classificacao: string; total: number }; Relationships: [] }
       v_leads_por_sentimento: { Row: { sentimento: string; total: number }; Relationships: [] }
       v_tempo_medio_resposta: { Row: { segundos_medio: number | null }; Relationships: [] }
+      lead_reports: { Row: Record<string, unknown>; Relationships: [] }
+      activity_logs: {
+        Row: {
+          id: string
+          event_type: string
+          entity_id: string | null
+          user_id: string | null
+          description: string
+          created_at: string
+          entity_type: string
+          log_category: string
+          status: string | null
+        }
+        Relationships: []
+      }
+      nps_survey_results: {
+        Row: { id: string; score: number; respondent_lead_id: string | null; equipe_id: string | null; comentario: string | null; created_at: string }
+        Insert: Partial<{ score: number; respondent_lead_id: string | null; equipe_id: string | null; comentario: string | null }>
+        Update: Record<string, unknown>
+        Relationships: []
+      }
+      report_schedules: {
+        Row: { id: string; created_by: string | null; email: string; frequency: string; report_type: string; filters: Record<string, unknown>; active: boolean; created_at: string }
+        Insert: Partial<{ email: string; frequency: string; report_type: string; filters: Record<string, unknown>; active: boolean; created_by: string | null }>
+        Update: Record<string, unknown>
+        Relationships: []
+      }
+      system_preferences: {
+        Row: SystemPreferences
+        Insert: Partial<SystemPreferences>
+        Update: Partial<SystemPreferences>
+        Relationships: []
+      }
+      custom_stages: {
+        Row: { id: string; nome: string; ordem: number; created_at: string }
+        Insert: Partial<{ nome: string; ordem: number }>
+        Update: Partial<{ nome: string; ordem: number }>
+        Relationships: []
+      }
+      backup_logs: {
+        Row: { id: string; download_url: string; created_by: string | null; file_size: number | null; status: string; created_at: string }
+        Insert: Partial<{ download_url: string; created_by: string | null; file_size: number | null; status: string }>
+        Update: Partial<{ status: string }>
+        Relationships: []
+      }
+      config_change_logs: {
+        Row: { id: string; user_id: string | null; area: string; action: string; details: Record<string, unknown>; created_at: string }
+        Insert: Partial<{ area: string; action: string; details: Record<string, unknown> }>
+        Update: Record<string, unknown>
+        Relationships: []
+      }
     }
     Functions: {
       log_audit: {

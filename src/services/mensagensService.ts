@@ -5,12 +5,12 @@ export const mensagensKeys = {
   byLead: (leadId: string) => ['mensagens', leadId] as const,
 }
 
-export async function fetchMensagens(leadId: string) {
+export async function fetchMensagens(leadId: string, order: 'asc' | 'desc' = 'desc') {
   const { data, error } = await supabase
     .from('mensagens_whatsapp')
     .select('*')
     .eq('lead_id', leadId)
-    .order('timestamp', { ascending: false })
+    .order('timestamp', { ascending: order === 'asc' })
   if (error) throw error
   return data as Mensagem[]
 }
@@ -28,8 +28,8 @@ export async function sendMensagem(leadId: string, conteudo: string, anexoUrl?: 
 }
 
 export async function uploadAttachment(file: File, leadId: string) {
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error('Arquivo excede o limite de 5MB')
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('Arquivo excede o limite de 10MB')
   }
   const ext = file.name.split('.').pop()
   const path = `${leadId}/${Date.now()}.${ext}`

@@ -1,14 +1,14 @@
 # Seed data instructions
 # Run AFTER creating users in Supabase Auth Dashboard
 
--- 1. Create users via Supabase Auth (email/password):
---    admin@crm.demo / Admin123!
+-- 1. Create users via Supabase Auth (email/password) or app signup:
+--    admin@admin.com / 12345678  (Administrador padrão)
 --    gestor@crm.demo / Gestor123!
 --    operacional1@crm.demo / Oper123!
 --    operacional2@crm.demo / Oper123!
 
 -- 2. Update profiles with roles (trigger creates profiles on signup):
-UPDATE public.profiles SET role = 'admin', full_name = 'Priscila Admin' WHERE email = 'admin@crm.demo';
+UPDATE public.profiles SET role = 'admin', full_name = 'Administrador' WHERE email = 'admin@admin.com';
 UPDATE public.profiles SET role = 'gestor', full_name = 'Ricardo Gestor' WHERE email = 'gestor@crm.demo';
 UPDATE public.profiles SET role = 'operacional', full_name = 'Mariana Vendedora' WHERE email = 'operacional1@crm.demo';
 UPDATE public.profiles SET role = 'operacional', full_name = 'Carlos Vendedor' WHERE email = 'operacional2@crm.demo';

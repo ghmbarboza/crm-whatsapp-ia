@@ -18,3 +18,14 @@ export function classificacaoLabel(c: Classificacao): string {
 export function sentimentoLabel(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
+
+export function sentimentoBadgeClass(s: string): string {
+  switch (s) {
+    case 'positivo':
+      return 'bg-green-100 text-green-800 border border-green-200'
+    case 'negativo':
+      return 'bg-red-100 text-red-800 border border-red-200'
+    default:
+      return 'bg-gray-100 text-gray-700 border border-gray-200'
+  }
+}

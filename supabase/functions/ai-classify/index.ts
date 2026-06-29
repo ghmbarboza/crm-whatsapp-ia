@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { sendEvolutionTextMessage } from "../_shared/evolutionApi.ts";
+import { loadEvolutionConfigFromDb } from "../_shared/evolutionConfig.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,13 +20,50 @@ interface AIResponse {
   sugestao_resposta?: string;
 }
 
-async function callAI(conteudo: string): Promise<AIResponse> {
+interface AISettings {
+  keywords_quente: string[];
+  keywords_frio: string[];
+  trigger_notify_quente: boolean;
+  trigger_notify_morno: boolean;
+  trigger_notify_frio: boolean;
+  classifier_version: string;
+}
+
+async function loadSettings(supabase: ReturnType<typeof createClient>): Promise<AISettings> {
+  const { data } = await supabase.from("ai_classification_settings").select("param_name, param_value");
+  const map = Object.fromEntries((data ?? []).map((r: { param_name: string; param_value: unknown }) => [r.param_name, r.param_value]));
+  return {
+    keywords_quente: (map.keywords_quente as string[]) ?? ["comprar", "urgente", "interessado"],
+    keywords_frio: (map.keywords_frio as string[]) ?? ["cancelar", "não tenho interesse"],
+    trigger_notify_quente: map.trigger_notify_quente !== false,
+    trigger_notify_morno: map.trigger_notify_morno === true,
+    trigger_notify_frio: map.trigger_notify_frio === true,
+    classifier_version: (map.classifier_version as string) ?? "1.0.0",
+  };
+}
+
+async function callAI(conteudo: string, settings: AISettings): Promise<AIResponse> {
+  const lower = conteudo.toLowerCase();
+  if (settings.keywords_quente.some((k) => lower.includes(k.toLowerCase()))) {
+    return {
+      classificacao: "quente",
+      sentimento: "positivo",
+      sugestao_resposta: "Olá! Obrigado pelo contato. Como posso ajudá-lo hoje?",
+    };
+  }
+  if (settings.keywords_frio.some((k) => lower.includes(k.toLowerCase()))) {
+    return {
+      classificacao: "frio",
+      sentimento: "negativo",
+      sugestao_resposta: "Entendido. Fico à disposição caso mude de ideia.",
+    };
+  }
+
   const apiUrl = Deno.env.get("AI_API_URL") || "https://api.openai.com/v1/chat/completions";
   const apiKey = Deno.env.get("AI_API_KEY");
   const model = Deno.env.get("AI_MODEL") || "gpt-4o-mini";
 
   if (!apiKey) {
-    const lower = conteudo.toLowerCase();
     const quente = ["comprar", "urgente", "interessado", "orçamento", "preço"].some((w) => lower.includes(w));
     const negativo = ["não", "cancelar", "reclamação", "ruim"].some((w) => lower.includes(w));
     return {
@@ -77,7 +116,8 @@ Deno.serve(async (req) => {
     );
 
     const { lead_id, mensagem_id, conteudo }: ClassifyRequest = await req.json();
-    const result = await callAI(conteudo);
+    const settings = await loadSettings(supabase);
+    const result = await callAI(conteudo, settings);
 
     await supabase
       .from("mensagens_whatsapp")
@@ -92,41 +132,60 @@ Deno.serve(async (req) => {
       })
       .eq("id", lead_id);
 
-    if (result.classificacao === "quente") {
-      const { data: lead } = await supabase
-        .from("leads")
-        .select("responsavel_id, nome")
-        .eq("id", lead_id)
-        .single();
+    await supabase.from("lead_auto_classifications").insert({
+      lead_id,
+      classification_enum: result.classificacao,
+      sentiment: result.sentimento,
+      trigger_source: "ai_classify",
+      classifier_version: settings.classifier_version,
+      initial_message: conteudo.slice(0, 500),
+    });
 
-      const followUpMsg = `🔥 Lead quente: ${lead?.nome || "Novo lead"} demonstrou alto interesse. Responda rapidamente!`;
+    if (result.classificacao === "quente" && settings.trigger_notify_quente) {
+      const { data: existingAlert } = await supabase
+        .from("alertas")
+        .select("id")
+        .eq("lead_id", lead_id)
+        .eq("tipo", "lead_quente")
+        .limit(1)
+        .maybeSingle();
 
-      await supabase.from("alertas").insert({
-        lead_id,
-        user_id: lead?.responsavel_id,
-        tipo: "lead_quente",
-        mensagem: followUpMsg,
-        enviado: false,
-      });
+      if (!existingAlert) {
+        const { data: lead } = await supabase
+          .from("leads")
+          .select("responsavel_id, nome")
+          .eq("id", lead_id)
+          .single();
 
-      const evolutionUrl = Deno.env.get("EVOLUTION_API_URL");
-      const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
-      const instance = Deno.env.get("EVOLUTION_INSTANCE") || "crm-whatsapp";
-      const notifyPhone = Deno.env.get("EVOLUTION_NOTIFY_PHONE");
+        const followUpMsg = `🔥 Lead quente: ${lead?.nome || "Novo lead"} demonstrou alto interesse. Responda rapidamente!`;
 
-      if (evolutionUrl && evolutionKey && notifyPhone) {
-        await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: evolutionKey },
-          body: JSON.stringify({ number: notifyPhone.replace(/\D/g, ""), text: followUpMsg }),
+        await supabase.from("alertas").insert({
+          lead_id,
+          user_id: lead?.responsavel_id,
+          tipo: "lead_quente",
+          mensagem: followUpMsg,
+          enviado: false,
         });
 
-        await supabase
-          .from("alertas")
-          .update({ enviado: true, enviado_em: new Date().toISOString() })
-          .eq("lead_id", lead_id)
-          .eq("tipo", "lead_quente")
-          .is("enviado_em", null);
+        const notifyPhone = Deno.env.get("EVOLUTION_NOTIFY_PHONE");
+        const evolution = await loadEvolutionConfigFromDb(supabase);
+
+        if (evolution && notifyPhone) {
+          await sendEvolutionTextMessage(
+            evolution.url,
+            evolution.key,
+            evolution.instance,
+            notifyPhone.replace(/\D/g, ""),
+            followUpMsg,
+          );
+
+          await supabase
+            .from("alertas")
+            .update({ enviado: true, enviado_em: new Date().toISOString() })
+            .eq("lead_id", lead_id)
+            .eq("tipo", "lead_quente")
+            .is("enviado_em", null);
+        }
       }
     }
 

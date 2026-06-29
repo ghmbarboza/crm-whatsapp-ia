@@ -26,3 +26,6 @@ tsconfig.tsbuildinfo
 *.njsproj
 *.sln
 *.sw?
+
+.firecrawl/
+supabase/.temp/

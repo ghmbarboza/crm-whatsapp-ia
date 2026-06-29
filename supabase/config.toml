@@ -1,5 +1,4 @@
-[project]
-id = "crm-whatsapp-ia"
+project_id = "njeznpgtomhnpxibnosr"
 
 [api]
 enabled = true
@@ -32,5 +31,17 @@ enabled = true
 enabled = true
 file_size_limit = "5MiB"
 
-[functions]
+[functions.whatsapp-integration]
+verify_jwt = false
+
+[functions.whatsapp-send]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.ai-classify]
+verify_jwt = false
+
+[functions.export-logs]
 verify_jwt = false
