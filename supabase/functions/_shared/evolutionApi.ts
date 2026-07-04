@@ -13,8 +13,20 @@ export const EVOLUTION_ENDPOINTS = {
   connectInstance: { method: "GET", path: "/instance/connect/{instanceName}" },
   connectionState: { method: "GET", path: "/instance/connectionState/{instanceName}" },
   sendText: { method: "POST", path: "/message/sendText/{instanceName}" },
+  setWebhook: { method: "POST", path: "/webhook/set/{instanceName}" },
   findMessages: { method: "POST", path: "/chat/findMessages/{instanceName}" },
 } as const;
+
+export const EVOLUTION_WEBHOOK_EVENTS = [
+  "MESSAGES_UPSERT",
+  "CONNECTION_UPDATE",
+] as const;
+
+export function getSupabaseWebhookUrl(): string {
+  const base = Deno.env.get("SUPABASE_URL");
+  if (!base) throw new Error("SUPABASE_URL não configurado");
+  return `${base.replace(/\/+$/, "")}/functions/v1/whatsapp-webhook`;
+}
 
 export type EvolutionConnectionState = "open" | "close" | "connecting" | string;
 
@@ -78,15 +90,18 @@ export async function evolutionRequest<T = Record<string, unknown>>(
   }
 
   if (!res.ok) {
+    const nestedResponse = data.response as Record<string, unknown> | undefined;
+    const nestedError = data.error as Record<string, unknown> | string | undefined;
     const message =
-      (data.message as string) ||
-      (data.error as string) ||
-      (typeof data.response === "object" && data.response !== null
-        ? String((data.response as Record<string, unknown>).message ?? "")
+      (nestedResponse?.message as string) ||
+      (typeof nestedError === "object" && nestedError !== null
+        ? String((nestedError as Record<string, unknown>).message ?? "")
         : "") ||
+      (typeof nestedError === "string" ? nestedError : "") ||
+      (data.message as string) ||
       text ||
       `Evolution API error ${res.status}`;
-    throw new Error(message);
+    throw new Error(message.trim() || `Evolution API error ${res.status}`);
   }
 
   return data as T;
@@ -96,7 +111,13 @@ export async function verifyEvolutionCredentials(
   baseUrl: string,
   apiKey: string,
 ): Promise<{ version?: string; message?: string }> {
-  return evolutionRequest(baseUrl, apiKey, "/");
+  const health = await evolutionRequest<Record<string, unknown>>(baseUrl, apiKey, "/");
+  // Per Evolution API docs, apikey is required on instance endpoints — health may not validate it.
+  await fetchEvolutionInstances(baseUrl, apiKey);
+  return {
+    version: health.version as string | undefined,
+    message: health.message as string | undefined,
+  };
 }
 
 export async function fetchEvolutionInstances(
@@ -120,14 +141,27 @@ export async function createEvolutionInstance(
   baseUrl: string,
   apiKey: string,
   instanceName: string,
+  webhookUrl?: string,
 ): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {
+    instanceName,
+    qrcode: true,
+    integration: "WHATSAPP-BAILEYS",
+  };
+
+  if (webhookUrl) {
+    body.webhook = {
+      enabled: true,
+      url: webhookUrl,
+      byEvents: false,
+      base64: false,
+      events: [...EVOLUTION_WEBHOOK_EVENTS],
+    };
+  }
+
   return evolutionRequest(baseUrl, apiKey, "/instance/create", {
     method: "POST",
-    body: {
-      instanceName,
-      qrcode: true,
-      integration: "WHATSAPP-BAILEYS",
-    },
+    body,
   });
 }
 
@@ -175,10 +209,36 @@ export async function sendEvolutionTextMessage(
   );
 }
 
+export async function setEvolutionWebhook(
+  baseUrl: string,
+  apiKey: string,
+  instanceName: string,
+  webhookUrl: string,
+): Promise<Record<string, unknown>> {
+  return evolutionRequest(
+    baseUrl,
+    apiKey,
+    pathWithInstance(EVOLUTION_ENDPOINTS.setWebhook.path, instanceName),
+    {
+      method: "POST",
+      body: {
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          byEvents: false,
+          base64: false,
+          events: [...EVOLUTION_WEBHOOK_EVENTS],
+        },
+      },
+    },
+  );
+}
+
 export async function provisionEvolutionInstance(
   baseUrl: string,
   apiKey: string,
   preferredName?: string,
+  webhookUrl?: string,
 ): Promise<{ instanceName: string; qrCode: string | null; connected: boolean }> {
   const normalizedUrl = normalizeEvolutionUrl(baseUrl);
   await verifyEvolutionCredentials(normalizedUrl, apiKey);
@@ -189,7 +249,12 @@ export async function provisionEvolutionInstance(
 
   if (!existing) {
     try {
-      const created = await createEvolutionInstance(normalizedUrl, apiKey, instanceName);
+      const created = await createEvolutionInstance(
+        normalizedUrl,
+        apiKey,
+        instanceName,
+        webhookUrl,
+      );
       const state = await getEvolutionConnectionState(normalizedUrl, apiKey, instanceName);
       return {
         instanceName,
@@ -200,7 +265,12 @@ export async function provisionEvolutionInstance(
       const message = error instanceof Error ? error.message : String(error);
       if (!/already|exists|conflict/i.test(message)) throw error;
       instanceName = generateInstanceName();
-      const created = await createEvolutionInstance(normalizedUrl, apiKey, instanceName);
+      const created = await createEvolutionInstance(
+        normalizedUrl,
+        apiKey,
+        instanceName,
+        webhookUrl,
+      );
       const state = await getEvolutionConnectionState(normalizedUrl, apiKey, instanceName);
       return {
         instanceName,
@@ -208,6 +278,10 @@ export async function provisionEvolutionInstance(
         connected: isEvolutionConnected(state),
       };
     }
+  }
+
+  if (webhookUrl) {
+    await setEvolutionWebhook(normalizedUrl, apiKey, instanceName, webhookUrl);
   }
 
   const state = await getEvolutionConnectionState(normalizedUrl, apiKey, instanceName);

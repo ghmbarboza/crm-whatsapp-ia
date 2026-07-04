@@ -14,7 +14,6 @@ import { DashboardScreen } from '@/screens/DashboardScreen'
 import { LeadsScreen } from '@/screens/LeadsScreen'
 import { LeadDetailPage } from '@/pages/LeadDetailPage'
 import { LiveChatPage } from '@/pages/LiveChatPage'
-import { ChatListScreen } from '@/screens/ChatListScreen'
 import { TeamManagementPage } from '@/pages/TeamManagementPage'
 import { WhatsAppIntegrationConfigPage } from '@/pages/WhatsAppIntegrationConfigPage'
 import { ClassificationAIConfigPage } from '@/pages/ClassificationAIConfigPage'
@@ -57,7 +56,7 @@ function AppRoutes() {
         <Route path="/pipeline" element={<Navigate to="/kanban" replace />} />
         <Route path="/leads" element={<LeadsScreen />} />
         <Route path="/leads/:id" element={<LeadDetailPage />} />
-        <Route path="/chat" element={<ChatListScreen />} />
+        <Route path="/chat" element={<LiveChatPage />} />
         <Route path="/chat/:leadId" element={<LiveChatPage />} />
         <Route path="/perfil" element={<PerfilScreen />} />
         <Route

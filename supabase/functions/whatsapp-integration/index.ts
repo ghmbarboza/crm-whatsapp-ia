@@ -4,9 +4,11 @@ import {
   connectEvolutionInstance,
   extractQrCode,
   getEvolutionConnectionState,
+  getSupabaseWebhookUrl,
   isEvolutionConnected,
   normalizeEvolutionUrl,
   provisionEvolutionInstance,
+  setEvolutionWebhook,
   verifyEvolutionCredentials,
 } from "../_shared/evolutionApi.ts";
 import { loadEvolutionConfigFromDb } from "../_shared/evolutionConfig.ts";
@@ -101,6 +103,24 @@ async function syncConnectionState(
   return connected;
 }
 
+function evolutionErrorStatus(message: string): number {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("permissão negada")) return 403;
+  if (normalized.includes("unauthorized") || normalized.includes("api key")) return 401;
+  if (normalized.includes("sessão inválida") || normalized.includes("não autorizado")) return 401;
+  if (normalized.includes("timeout") || normalized.includes("fetch failed") || normalized.includes("connection")) {
+    return 502;
+  }
+  return 500;
+}
+
+function errorResponse(message: string, status = 500) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -168,7 +188,13 @@ Deno.serve(async (req) => {
         (existingParams.evolution_instance as string | undefined) ||
         undefined;
 
-      const provisioned = await provisionEvolutionInstance(url, key, preferredInstance);
+      const webhookUrl = getSupabaseWebhookUrl();
+      const provisioned = await provisionEvolutionInstance(
+        url,
+        key,
+        preferredInstance,
+        webhookUrl,
+      );
 
       await persistEvolutionSetup(service, {
         url,
@@ -210,6 +236,13 @@ Deno.serve(async (req) => {
     if (action === "connect") {
       await assertAdmin(supabase, user.id);
 
+      await setEvolutionWebhook(
+        config.url,
+        config.key,
+        config.instance,
+        getSupabaseWebhookUrl(),
+      );
+
       const connected = await syncConnectionState(service, config);
       let qr: string | null = null;
 
@@ -246,6 +279,13 @@ Deno.serve(async (req) => {
     }
 
     if (action === "test") {
+      await setEvolutionWebhook(
+        config.url,
+        config.key,
+        config.instance,
+        getSupabaseWebhookUrl(),
+      );
+
       const connected = await syncConnectionState(service, config);
       await service.from("integration_logs").insert({
         event: "connectivity_test",
@@ -264,9 +304,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error(error);
-    return new Response(JSON.stringify({ error: String(error) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(message.replace(/^Error:\s*/i, ""), evolutionErrorStatus(message));
   }
 });

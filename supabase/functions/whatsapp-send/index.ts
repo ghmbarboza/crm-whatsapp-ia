@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { sendEvolutionTextMessage } from "../_shared/evolutionApi.ts";
 import { loadEvolutionConfigFromDb } from "../_shared/evolutionConfig.ts";
+import { toEvolutionNumber } from "../_shared/phoneUtils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,7 +26,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      { global: { headers: { Authorization: authHeader } } },
     );
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -54,20 +55,35 @@ Deno.serve(async (req) => {
 
     const serviceClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
     const evolution = await loadEvolutionConfigFromDb(serviceClient);
-    if (evolution) {
-      const phone = lead.telefone.replace(/\D/g, "");
-      await sendEvolutionTextMessage(
-        evolution.url,
-        evolution.key,
-        evolution.instance,
-        phone,
-        conteudo,
+    if (!evolution) {
+      return new Response(
+        JSON.stringify({ error: "Evolution API não configurada. Conecte em Configurações > WhatsApp." }),
+        {
+          status: 503,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
     }
+
+    const evolutionNumber = toEvolutionNumber(lead.telefone);
+    if (!evolutionNumber) {
+      return new Response(JSON.stringify({ error: "Telefone do lead inválido para envio" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    await sendEvolutionTextMessage(
+      evolution.url,
+      evolution.key,
+      evolution.instance,
+      evolutionNumber,
+      conteudo,
+    );
 
     const { data: mensagem, error } = await serviceClient
       .from("mensagens_whatsapp")
@@ -88,7 +104,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error(error);
+    console.error("[whatsapp-send]", error);
     return new Response(JSON.stringify({ error: String(error) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

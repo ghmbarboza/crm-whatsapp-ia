@@ -38,12 +38,13 @@ Ou execute os arquivos em `supabase/migrations/` manualmente no SQL Editor.
 ```bash
 npx supabase functions deploy whatsapp-webhook
 npx supabase functions deploy whatsapp-send
+npx supabase functions deploy whatsapp-integration
 npx supabase functions deploy ai-classify
 npx supabase functions deploy export-logs
 ```
 
 Configure secrets no Supabase Dashboard:
-- `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`
+- `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE` (opcional se salvo em `integration_settings`)
 - `AI_API_URL`, `AI_API_KEY`, `AI_MODEL`
 
 ### 5. Criar usuários demo
@@ -52,8 +53,12 @@ Crie usuários no Supabase Auth e execute `supabase/seed.sql`.
 
 ### 6. Evolution API
 
-Configure webhook da Evolution API para:
+O webhook é registrado automaticamente ao conectar a Evolution em **Configurações > WhatsApp** (ação setup/connect/test).
+
+URL do webhook (referência):
 `https://YOUR_PROJECT.supabase.co/functions/v1/whatsapp-webhook`
+
+Se mensagens não chegarem após atualizar o código, abra **WhatsApp > Testar conectividade** no admin para re-registrar o webhook na instância.
 
 ### 7. Executar
 

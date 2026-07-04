@@ -205,16 +205,53 @@ export function previewAutoMessage(message: string): string {
 
 type IntegrationAction = 'setup' | 'connect' | 'status' | 'test'
 
+function formatInvokeError(status: number, body: Record<string, unknown>): string {
+  const raw = body.error
+  if (typeof raw === 'string') {
+    return raw.replace(/^Error:\s*/i, '')
+  }
+  if (raw && typeof raw === 'object' && 'message' in raw) {
+    return String((raw as { message?: string }).message ?? `Falha na integração (${status})`)
+  }
+  return `Falha na integração Evolution (${status})`
+}
+
 async function invokeIntegration(
   action: IntegrationAction,
   payload?: Record<string, unknown>
 ) {
-  const { data, error } = await supabase.functions.invoke('whatsapp-integration', {
-    body: { action, ...payload },
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) {
+    throw new Error('Sessão expirada. Faça login novamente.')
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase não configurado no ambiente.')
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-integration`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ action, ...payload }),
   })
-  if (error) throw error
-  if (data?.error) throw new Error(data.error)
-  return data as {
+
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>
+
+  if (!response.ok) {
+    throw new Error(formatInvokeError(response.status, body))
+  }
+  if (body.error) {
+    throw new Error(formatInvokeError(response.status, body))
+  }
+
+  return body as {
     status?: 'connected' | 'disconnected'
     qr_code?: string | null
     ok?: boolean
@@ -230,7 +267,6 @@ export async function setupEvolutionConnection(
     evolution_url: evolutionUrl.trim(),
     evolution_api_key: evolutionApiKey.trim(),
   })
-  await logIntegrationEvent('evolution_setup', 'success', 'Credenciais Evolution configuradas')
   return {
     status: data.status ?? 'disconnected',
     qr_code: data.qr_code,

@@ -29,3 +29,5 @@ tsconfig.tsbuildinfo
 
 .firecrawl/
 supabase/.temp/
+.vercel
+.env*

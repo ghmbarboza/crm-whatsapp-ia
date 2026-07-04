@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { sendEvolutionTextMessage } from "../_shared/evolutionApi.ts";
 import { loadEvolutionConfigFromDb } from "../_shared/evolutionConfig.ts";
+import { toEvolutionNumber } from "../_shared/phoneUtils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -175,7 +176,7 @@ Deno.serve(async (req) => {
             evolution.url,
             evolution.key,
             evolution.instance,
-            notifyPhone.replace(/\D/g, ""),
+            toEvolutionNumber(notifyPhone),
             followUpMsg,
           );
 

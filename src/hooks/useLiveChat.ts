@@ -3,12 +3,23 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { mensagensKeys, fetchMensagens, sendMensagem, uploadAttachment } from '@/services/mensagensService'
 import { fetchAiSuggestions, logChatEvent } from '@/services/liveChatService'
+import { leadsKeys } from '@/services/leadsService'
 import { supabase } from '@/integrations/supabase/client'
 import { showLocalNotification } from '@/utils/pushNotifications'
 import type { Lead, Mensagem } from '@/integrations/supabase/types'
 
 const NOTIFY_COOLDOWN_MS = 30_000
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+async function triggerAiClassification(leadId: string, mensagemId: string, conteudo: string) {
+  try {
+    await supabase.functions.invoke('ai-classify', {
+      body: { lead_id: leadId, mensagem_id: mensagemId, conteudo },
+    })
+  } catch {
+    // classificação é assíncrona; falhas não bloqueiam o chat
+  }
+}
 
 export function useLiveChat(leadId: string, lead?: Lead | null) {
   const queryClient = useQueryClient()
@@ -31,10 +42,10 @@ export function useLiveChat(leadId: string, lead?: Lead | null) {
     .find((m) => m.tipo === 'recebida')
 
   const suggestionsQuery = useQuery({
-    queryKey: ['ai-suggestions', leadId, lastReceived?.id],
+    queryKey: ['ai-suggestions', leadId, lastReceived?.id, lastReceived?.sentimento],
     queryFn: () => fetchAiSuggestions(leadId, lastReceived?.conteudo),
     enabled: !!leadId,
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
 
   const notifyRateLimited = useCallback((title: string, body: string, hot = false) => {
@@ -46,7 +57,6 @@ export function useLiveChat(leadId: string, lead?: Lead | null) {
       toast.error(title, {
         description: body,
         duration: 8000,
-        action: { label: 'Responder', onClick: () => {} },
       })
     } else {
       toast.info(title, { description: body })
@@ -63,21 +73,36 @@ export function useLiveChat(leadId: string, lead?: Lead | null) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'mensagens_whatsapp', filter: `lead_id=eq.${leadId}` },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: mensagensKeys.byLead(leadId) })
           const msg = payload.new as Mensagem
+          queryClient.invalidateQueries({ queryKey: mensagensKeys.byLead(leadId) })
+
           if (msg.tipo === 'recebida') {
             logChatEvent(leadId, 'mensagem_recebida', { preview: msg.conteudo.slice(0, 100) })
             notifyRateLimited('Nova mensagem', msg.conteudo.slice(0, 80))
             if (lead?.classificacao === 'quente') {
               notifyRateLimited('Lead quente respondeu!', 'Priorize este atendimento.', true)
             }
+            if (!msg.analisado) {
+              triggerAiClassification(leadId, msg.id, msg.conteudo)
+            }
           }
         }
       )
       .on(
         'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mensagens_whatsapp', filter: `lead_id=eq.${leadId}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: mensagensKeys.byLead(leadId) })
+          queryClient.invalidateQueries({ queryKey: ['ai-suggestions', leadId] })
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'leads', filter: `id=eq.${leadId}` },
-        () => queryClient.invalidateQueries({ queryKey: ['leads', leadId] })
+        () => {
+          queryClient.invalidateQueries({ queryKey: leadsKeys.detail(leadId) })
+          queryClient.invalidateQueries({ queryKey: leadsKeys.all })
+        }
       )
       .subscribe()
 
@@ -111,9 +136,7 @@ export function useLiveChat(leadId: string, lead?: Lead | null) {
       queryClient.invalidateQueries({ queryKey: mensagensKeys.byLead(leadId) })
     },
     onError: (e: Error) => {
-      toast.error(e.message || 'Falha ao enviar mensagem', {
-        action: { label: 'Tentar novamente', onClick: () => sendMutation.reset() },
-      })
+      toast.error(e.message || 'Falha ao enviar mensagem')
     },
   })
 
@@ -127,6 +150,7 @@ export function useLiveChat(leadId: string, lead?: Lead | null) {
   return {
     messages: messagesQuery.data || [],
     isLoading: messagesQuery.isLoading,
+    isError: messagesQuery.isError,
     suggestions: suggestionsQuery.data || [],
     sendMutation,
     acceptSuggestion,
